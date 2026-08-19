@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shopapp-frontend
+  labels:
+    app: shopapp-frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: shopapp-frontend
+  template:
+    metadata:
+      labels:
+        app: shopapp-frontend
+    spec:
+      containers:
+        - name: shopapp-frontend
+          image: harsh042/shopapp-frontend:v1.0.0
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
