@@ -1,0 +1,26 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shopapp-ingress
+  namespace: default
+spec:
+  ingressClassName: haproxy
+  rules:
+    - host: harshalxz.3utilities.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: shopapp-backend-service
+                port:
+                  number: 5000
+
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: shopapp-frontend-service
+                port:
+                  number: 80
