@@ -1,84 +1,172 @@
-﻿import { products } from "../data/mockData.js";
+﻿import pool from "../config/db.js";
+
+// Convert MySQL product row to the same format
+// your frontend currently receives from mockData.js
+function formatProduct(row) {
+  let features = [];
+
+  try {
+    features = row.features
+      ? typeof row.features === "string"
+        ? JSON.parse(row.features)
+        : row.features
+      : [];
+  } catch {
+    features = [];
+  }
+
+  return {
+    id: row.id,
+    name: row.name,
+    category: row.category,
+    brand: row.brand,
+    price: Number(row.price),
+    oldPrice: row.oldPrice !== null ? Number(row.oldPrice) : null,
+    discount: Number(row.discount || 0),
+    rating: Number(row.rating || 0),
+    reviews: Number(row.reviews || 0),
+    isFeatured: Boolean(row.isFeatured),
+    isNew: Boolean(row.isNew),
+    description: row.description || "",
+    features,
+    image: row.image || "",
+  };
+}
+
 
 // @desc    Get all products with filtering, search, and sorting
 // @route   GET /api/products
 // @access  Public
-export const getProducts = (req, res) => {
+export const getProducts = async (req, res) => {
   try {
-    let result = [...products];
-    const { category, brand, search, minPrice, maxPrice, isFeatured, isNew, deals, bestsellers, sort } = req.query;
+    const {
+      category,
+      brand,
+      search,
+      minPrice,
+      maxPrice,
+      isFeatured,
+      isNew,
+      deals,
+      bestsellers,
+      sort,
+    } = req.query;
 
-    // Filter by Category
+    let sql = `
+      SELECT
+        p.id,
+        p.name,
+        c.name AS category,
+        p.brand,
+        p.price,
+        p.old_price AS oldPrice,
+        p.discount,
+        p.rating,
+        p.reviews,
+        p.is_featured AS isFeatured,
+        p.is_new AS isNew,
+        p.description,
+        p.features,
+        p.image
+      FROM products p
+      INNER JOIN categories c
+        ON p.category_id = c.id
+      WHERE 1 = 1
+    `;
+
+    const params = [];
+
+    // Category filter
     if (category && category !== "All Categories") {
-      result = result.filter(
-        (p) => p.category.toLowerCase() === category.toLowerCase()
-      );
+      sql += ` AND LOWER(c.name) = LOWER(?)`;
+      params.push(category);
     }
 
-    // Filter by Brand
+    // Brand filter
     if (brand) {
-      result = result.filter(
-        (p) => p.brand.toLowerCase() === brand.toLowerCase()
-      );
+      sql += ` AND LOWER(p.brand) = LOWER(?)`;
+      params.push(brand);
     }
 
-    // Search query
+    // Search
     if (search) {
-      const q = search.toLowerCase().trim();
-      result = result.filter(
-        (p) =>
-          p.name.toLowerCase().includes(q) ||
-          p.category.toLowerCase().includes(q) ||
-          p.brand.toLowerCase().includes(q) ||
-          p.description.toLowerCase().includes(q)
+      sql += `
+        AND (
+          LOWER(p.name) LIKE LOWER(?)
+          OR LOWER(c.name) LIKE LOWER(?)
+          OR LOWER(p.brand) LIKE LOWER(?)
+          OR LOWER(p.description) LIKE LOWER(?)
+        )
+      `;
+
+      const searchTerm = `%${search.trim()}%`;
+
+      params.push(
+        searchTerm,
+        searchTerm,
+        searchTerm,
+        searchTerm
       );
     }
 
-    // Price range filters
+    // Minimum price
     if (minPrice) {
-      result = result.filter((p) => p.price >= parseFloat(minPrice));
+      sql += ` AND p.price >= ?`;
+      params.push(parseFloat(minPrice));
     }
+
+    // Maximum price
     if (maxPrice) {
-      result = result.filter((p) => p.price <= parseFloat(maxPrice));
+      sql += ` AND p.price <= ?`;
+      params.push(parseFloat(maxPrice));
     }
 
-    // Deals filter (discount >= 20%)
+    // Deals
     if (deals === "true") {
-      result = result.filter((p) => p.discount >= 20);
+      sql += ` AND p.discount >= 20`;
     }
 
-    // Best Sellers filter (rating >= 4.7)
+    // Best sellers
     if (bestsellers === "true") {
-      result = result.filter((p) => p.rating >= 4.7);
+      sql += ` AND p.rating >= 4.7`;
     }
 
-    // New arrivals
+    // New products
     if (isNew === "true") {
-      result = result.filter((p) => p.isNew === true);
+      sql += ` AND p.is_new = TRUE`;
     }
 
-    // Featured
+    // Featured products
     if (isFeatured === "true") {
-      result = result.filter((p) => p.isFeatured === true);
+      sql += ` AND p.is_featured = TRUE`;
     }
 
     // Sorting
     if (sort === "price-asc") {
-      result.sort((a, b) => a.price - b.price);
+      sql += ` ORDER BY p.price ASC`;
     } else if (sort === "price-desc") {
-      result.sort((a, b) => b.price - a.price);
+      sql += ` ORDER BY p.price DESC`;
     } else if (sort === "rating-desc") {
-      result.sort((a, b) => b.rating - a.rating);
+      sql += ` ORDER BY p.rating DESC`;
     } else if (sort === "popular") {
-      result.sort((a, b) => b.reviews - a.reviews);
+      sql += ` ORDER BY p.reviews DESC`;
+    } else {
+      sql += ` ORDER BY p.id ASC`;
     }
+
+    const [rows] = await pool.query(sql, params);
+
+    const result = rows.map(formatProduct);
 
     res.status(200).json({
       success: true,
       count: result.length,
       data: result,
     });
+
   } catch (error) {
+    console.error("Get products error:", error);
+
     res.status(500).json({
       success: false,
       message: "Server Error fetching products",
@@ -87,15 +175,40 @@ export const getProducts = (req, res) => {
   }
 };
 
+
 // @desc    Get single product by ID
 // @route   GET /api/products/:id
 // @access  Public
-export const getProductById = (req, res) => {
+export const getProductById = async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
-    const product = products.find((p) => p.id === id);
 
-    if (!product) {
+    const [rows] = await pool.query(
+      `
+      SELECT
+        p.id,
+        p.name,
+        c.name AS category,
+        p.brand,
+        p.price,
+        p.old_price AS oldPrice,
+        p.discount,
+        p.rating,
+        p.reviews,
+        p.is_featured AS isFeatured,
+        p.is_new AS isNew,
+        p.description,
+        p.features,
+        p.image
+      FROM products p
+      INNER JOIN categories c
+        ON p.category_id = c.id
+      WHERE p.id = ?
+      `,
+      [id]
+    );
+
+    if (rows.length === 0) {
       return res.status(404).json({
         success: false,
         message: `Product with ID ${req.params.id} not found`,
@@ -104,9 +217,12 @@ export const getProductById = (req, res) => {
 
     res.status(200).json({
       success: true,
-      data: product,
+      data: formatProduct(rows[0]),
     });
+
   } catch (error) {
+    console.error("Get product error:", error);
+
     res.status(500).json({
       success: false,
       message: "Server Error fetching product",
@@ -115,12 +231,23 @@ export const getProductById = (req, res) => {
   }
 };
 
+
 // @desc    Create a new product
 // @route   POST /api/products
 // @access  Public (for dev simulation)
-export const createProduct = (req, res) => {
+export const createProduct = async (req, res) => {
   try {
-    const { name, category, brand, price, oldPrice, discount, description, features, image } = req.body;
+    const {
+      name,
+      category,
+      brand,
+      price,
+      oldPrice,
+      discount,
+      description,
+      features,
+      image,
+    } = req.body;
 
     if (!name || !category || !price) {
       return res.status(400).json({
@@ -129,32 +256,99 @@ export const createProduct = (req, res) => {
       });
     }
 
-    const newId = products.length > 0 ? Math.max(...products.map((p) => p.id)) + 1 : 1;
-    const newProduct = {
-      id: newId,
-      name,
-      category,
-      brand: brand || "Generic",
-      price: parseFloat(price),
-      oldPrice: oldPrice ? parseFloat(oldPrice) : parseFloat(price),
-      discount: discount ? parseInt(discount, 10) : 0,
-      rating: 5.0,
-      reviews: 1,
-      isFeatured: false,
-      isNew: true,
-      description: description || "",
-      features: features || [],
-      image: image || "https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?auto=format&fit=crop&w=800&q=85",
-    };
+    // Find category ID
+    const [categoryRows] = await pool.query(
+      `
+      SELECT id
+      FROM categories
+      WHERE LOWER(name) = LOWER(?)
+      LIMIT 1
+      `,
+      [category]
+    );
 
-    products.push(newProduct);
+    if (categoryRows.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Category '${category}' not found`,
+      });
+    }
+
+    const categoryId = categoryRows[0].id;
+
+    const [result] = await pool.query(
+      `
+      INSERT INTO products
+      (
+        name,
+        category_id,
+        brand,
+        price,
+        old_price,
+        discount,
+        rating,
+        reviews,
+        is_featured,
+        is_new,
+        description,
+        features,
+        image
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        name,
+        categoryId,
+        brand || "Generic",
+        parseFloat(price),
+        oldPrice ? parseFloat(oldPrice) : parseFloat(price),
+        discount ? parseInt(discount, 10) : 0,
+        5.0,
+        1,
+        false,
+        true,
+        description || "",
+        JSON.stringify(features || []),
+        image ||
+          "https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?auto=format&fit=crop&w=800&q=85",
+      ]
+    );
+
+    // Get newly created product
+    const [rows] = await pool.query(
+      `
+      SELECT
+        p.id,
+        p.name,
+        c.name AS category,
+        p.brand,
+        p.price,
+        p.old_price AS oldPrice,
+        p.discount,
+        p.rating,
+        p.reviews,
+        p.is_featured AS isFeatured,
+        p.is_new AS isNew,
+        p.description,
+        p.features,
+        p.image
+      FROM products p
+      INNER JOIN categories c
+        ON p.category_id = c.id
+      WHERE p.id = ?
+      `,
+      [result.insertId]
+    );
 
     res.status(201).json({
       success: true,
       message: "Product created successfully",
-      data: newProduct,
+      data: formatProduct(rows[0]),
     });
+
   } catch (error) {
+    console.error("Create product error:", error);
+
     res.status(500).json({
       success: false,
       message: "Server Error creating product",
@@ -163,33 +357,159 @@ export const createProduct = (req, res) => {
   }
 };
 
+
 // @desc    Update a product
 // @route   PUT /api/products/:id
 // @access  Public
-export const updateProduct = (req, res) => {
+export const updateProduct = async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
-    const index = products.findIndex((p) => p.id === id);
 
-    if (index === -1) {
+    const [existingRows] = await pool.query(
+      `
+      SELECT
+        p.id,
+        p.name,
+        c.name AS category,
+        p.brand,
+        p.price,
+        p.old_price AS oldPrice,
+        p.discount,
+        p.rating,
+        p.reviews,
+        p.is_featured AS isFeatured,
+        p.is_new AS isNew,
+        p.description,
+        p.features,
+        p.image
+      FROM products p
+      INNER JOIN categories c
+        ON p.category_id = c.id
+      WHERE p.id = ?
+      `,
+      [id]
+    );
+
+    if (existingRows.length === 0) {
       return res.status(404).json({
         success: false,
         message: `Product with ID ${req.params.id} not found`,
       });
     }
 
-    products[index] = {
-      ...products[index],
+    const current = formatProduct(existingRows[0]);
+
+    const updated = {
+      ...current,
       ...req.body,
-      id, // ensure ID is not mutated
+      id,
     };
+
+    let categoryId = existingRows[0].category;
+
+    if (req.body.category) {
+      const [categoryRows] = await pool.query(
+        `
+        SELECT id
+        FROM categories
+        WHERE LOWER(name) = LOWER(?)
+        LIMIT 1
+        `,
+        [req.body.category]
+      );
+
+      if (categoryRows.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: `Category '${req.body.category}' not found`,
+        });
+      }
+
+      categoryId = categoryRows[0].id;
+    } else {
+      const [categoryRows] = await pool.query(
+        `
+        SELECT category_id
+        FROM products
+        WHERE id = ?
+        `,
+        [id]
+      );
+
+      categoryId = categoryRows[0].category_id;
+    }
+
+    await pool.query(
+      `
+      UPDATE products
+      SET
+        name = ?,
+        category_id = ?,
+        brand = ?,
+        price = ?,
+        old_price = ?,
+        discount = ?,
+        rating = ?,
+        reviews = ?,
+        is_featured = ?,
+        is_new = ?,
+        description = ?,
+        features = ?,
+        image = ?
+      WHERE id = ?
+      `,
+      [
+        updated.name,
+        categoryId,
+        updated.brand,
+        updated.price,
+        updated.oldPrice,
+        updated.discount,
+        updated.rating,
+        updated.reviews,
+        updated.isFeatured,
+        updated.isNew,
+        updated.description,
+        JSON.stringify(updated.features || []),
+        updated.image,
+        id,
+      ]
+    );
+
+    const [rows] = await pool.query(
+      `
+      SELECT
+        p.id,
+        p.name,
+        c.name AS category,
+        p.brand,
+        p.price,
+        p.old_price AS oldPrice,
+        p.discount,
+        p.rating,
+        p.reviews,
+        p.is_featured AS isFeatured,
+        p.is_new AS isNew,
+        p.description,
+        p.features,
+        p.image
+      FROM products p
+      INNER JOIN categories c
+        ON p.category_id = c.id
+      WHERE p.id = ?
+      `,
+      [id]
+    );
 
     res.status(200).json({
       success: true,
       message: "Product updated successfully",
-      data: products[index],
+      data: formatProduct(rows[0]),
     });
+
   } catch (error) {
+    console.error("Update product error:", error);
+
     res.status(500).json({
       success: false,
       message: "Server Error updating product",
@@ -198,29 +518,62 @@ export const updateProduct = (req, res) => {
   }
 };
 
+
 // @desc    Delete a product
 // @route   DELETE /api/products/:id
 // @access  Public
-export const deleteProduct = (req, res) => {
+export const deleteProduct = async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
-    const index = products.findIndex((p) => p.id === id);
 
-    if (index === -1) {
+    const [rows] = await pool.query(
+      `
+      SELECT
+        p.id,
+        p.name,
+        c.name AS category,
+        p.brand,
+        p.price,
+        p.old_price AS oldPrice,
+        p.discount,
+        p.rating,
+        p.reviews,
+        p.is_featured AS isFeatured,
+        p.is_new AS isNew,
+        p.description,
+        p.features,
+        p.image
+      FROM products p
+      INNER JOIN categories c
+        ON p.category_id = c.id
+      WHERE p.id = ?
+      `,
+      [id]
+    );
+
+    if (rows.length === 0) {
       return res.status(404).json({
         success: false,
         message: `Product with ID ${req.params.id} not found`,
       });
     }
 
-    const deleted = products.splice(index, 1);
+    const deletedProduct = formatProduct(rows[0]);
+
+    await pool.query(
+      `DELETE FROM products WHERE id = ?`,
+      [id]
+    );
 
     res.status(200).json({
       success: true,
       message: "Product deleted successfully",
-      data: deleted[0],
+      data: deletedProduct,
     });
+
   } catch (error) {
+    console.error("Delete product error:", error);
+
     res.status(500).json({
       success: false,
       message: "Server Error deleting product",

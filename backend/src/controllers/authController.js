@@ -1,9 +1,9 @@
-﻿import { users } from "../data/mockData.js";
+﻿import pool from "../config/db.js";
 
 // @desc    Sign in user
 // @route   POST /api/auth/signin
 // @access  Public
-export const signin = (req, res) => {
+export const signin = async (req, res) => {
   try {
     const { email, password } = req.body;
 
@@ -14,17 +14,33 @@ export const signin = (req, res) => {
       });
     }
 
-    const user = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
+    const [rows] = await pool.query(
+      `
+      SELECT
+        id,
+        name,
+        email,
+        password_hash AS passwordHash,
+        role
+      FROM users
+      WHERE LOWER(email) = LOWER(?)
+      LIMIT 1
+      `,
+      [email.trim()]
+    );
+
+    const user = rows[0];
 
     if (!user || user.passwordHash !== password) {
-      // In demo mode, permit any credentials for easy testing
+      // Keep existing demo behavior for now
       const demoUser = {
-        id: users.length + 1,
+        id: null,
         name: email.split("@")[0],
         email,
         role: "customer",
         token: "demo-jwt-token-" + Date.now(),
       };
+
       return res.status(200).json({
         success: true,
         message: "Signed in successfully!",
@@ -43,7 +59,10 @@ export const signin = (req, res) => {
         token: "demo-jwt-token-" + user.id,
       },
     });
+
   } catch (error) {
+    console.error("Signin error:", error);
+
     res.status(500).json({
       success: false,
       message: "Server Error during signin",
@@ -52,10 +71,11 @@ export const signin = (req, res) => {
   }
 };
 
+
 // @desc    Register a new user
 // @route   POST /api/auth/signup
 // @access  Public
-export const signup = (req, res) => {
+export const signup = async (req, res) => {
   try {
     const { name, email, password } = req.body;
 
@@ -66,24 +86,53 @@ export const signup = (req, res) => {
       });
     }
 
-    const existing = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
-    if (existing) {
+    const cleanEmail = email.trim().toLowerCase();
+
+    // Check if user already exists
+    const [existingRows] = await pool.query(
+      `
+      SELECT id
+      FROM users
+      WHERE LOWER(email) = LOWER(?)
+      LIMIT 1
+      `,
+      [cleanEmail]
+    );
+
+    if (existingRows.length > 0) {
       return res.status(400).json({
         success: false,
         message: "User with this email already exists",
       });
     }
 
-    const newUser = {
-      id: users.length + 1,
-      name,
-      email,
-      passwordHash: password,
-      role: "customer",
-      joinedAt: new Date().toISOString(),
-    };
+    // Create user in MySQL
+    const [result] = await pool.query(
+      `
+      INSERT INTO users
+      (
+        name,
+        email,
+        password_hash,
+        role,
+        joined_at
+      )
+      VALUES (?, ?, ?, ?, NOW())
+      `,
+      [
+        name.trim(),
+        cleanEmail,
+        password,
+        "customer",
+      ]
+    );
 
-    users.push(newUser);
+    const newUser = {
+      id: result.insertId,
+      name: name.trim(),
+      email: cleanEmail,
+      role: "customer",
+    };
 
     res.status(201).json({
       success: true,
@@ -96,7 +145,18 @@ export const signup = (req, res) => {
         token: "demo-jwt-token-" + newUser.id,
       },
     });
+
   } catch (error) {
+    console.error("Signup error:", error);
+
+    // Handle MySQL duplicate email constraint
+    if (error.code === "ER_DUP_ENTRY") {
+      return res.status(400).json({
+        success: false,
+        message: "User with this email already exists",
+      });
+    }
+
     res.status(500).json({
       success: false,
       message: "Server Error during signup",

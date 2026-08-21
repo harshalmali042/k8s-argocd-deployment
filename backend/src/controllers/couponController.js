@@ -1,9 +1,9 @@
-﻿import { coupons } from "../data/mockData.js";
+﻿import pool from "../config/db.js";
 
 // @desc    Validate a promo coupon code
 // @route   POST /api/coupons/validate
 // @access  Public
-export const validateCoupon = (req, res) => {
+export const validateCoupon = async (req, res) => {
   try {
     const { code, subtotal } = req.body;
 
@@ -15,19 +15,38 @@ export const validateCoupon = (req, res) => {
     }
 
     const cleanCode = code.trim().toUpperCase();
-    const coupon = coupons.find((c) => c.code === cleanCode);
 
-    if (!coupon) {
+    // Find coupon from MySQL
+    const [rows] = await pool.query(
+      `
+      SELECT
+        code,
+        discount_percent AS discountPercent,
+        max_discount AS maxDiscount,
+        description
+      FROM coupons
+      WHERE code = ?
+      LIMIT 1
+      `,
+      [cleanCode]
+    );
+
+    if (rows.length === 0) {
       return res.status(400).json({
         success: false,
         message: `Coupon "${cleanCode}" is invalid or expired. Try SAVE20 or SUMMER40.`,
       });
     }
 
-    const cartSubtotal = subtotal ? parseFloat(subtotal) : 0;
+    const coupon = rows[0];
+
+    const cartSubtotal = subtotal
+      ? parseFloat(subtotal)
+      : 0;
+
     const discountAmount = Math.min(
-      (cartSubtotal * coupon.discountPercent) / 100,
-      coupon.maxDiscount
+      (cartSubtotal * Number(coupon.discountPercent)) / 100,
+      Number(coupon.maxDiscount)
     );
 
     res.status(200).json({
@@ -35,12 +54,15 @@ export const validateCoupon = (req, res) => {
       message: `Coupon applied: ${coupon.discountPercent}% OFF!`,
       data: {
         code: coupon.code,
-        discountPercent: coupon.discountPercent,
+        discountPercent: Number(coupon.discountPercent),
         discountAmount,
         description: coupon.description,
       },
     });
+
   } catch (error) {
+    console.error("Validate coupon error:", error);
+
     res.status(500).json({
       success: false,
       message: "Server Error validating coupon",
