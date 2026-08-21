@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: shopapp-backend
-          image: harsh042/shopapp-backend:v1.0.0
+          image: harsh042/shopapp-backend:v2.0.0
           ports:
             - containerPort: 5000
           env:
