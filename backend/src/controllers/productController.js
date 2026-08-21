@@ -1,7 +1,6 @@
 ﻿import pool from "../config/db.js";
 
 // Convert MySQL product row to the same format
-// your frontend currently receives from mockData.js
 function formatProduct(row) {
   let features = [];
 
