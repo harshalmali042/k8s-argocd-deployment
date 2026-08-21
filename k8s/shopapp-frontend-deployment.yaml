@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: shopapp-frontend
-          image: harsh042/shopapp-frontend:v1.0.0
+          image: harsh042/shopapp-frontend:v2.0.0
           ports:
             - containerPort: 80
           resources:
