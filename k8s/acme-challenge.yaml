@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: acme-challenge
+  namespace: default
+data: {}
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: acme-challenge
+  namespace: default
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: acme-challenge
+  template:
+    metadata:
+      labels:
+        app: acme-challenge
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:alpine
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: challenge
+              mountPath: /usr/share/nginx/html/.well-known/acme-challenge
+      volumes:
+        - name: challenge
+          emptyDir: {}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: acme-challenge
+  namespace: default
+spec:
+  selector:
+    app: acme-challenge
+  ports:
+    - port: 80
+      targetPort: 80
