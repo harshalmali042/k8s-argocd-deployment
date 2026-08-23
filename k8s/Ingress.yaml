@@ -4,7 +4,7 @@ metadata:
   name: shopapp-ingress
   namespace: default
 spec:
-  ingressClassName: haproxy
+  ingressClassName: nginx
   rules:
     - host: harshalxz.3utilities.com
       http:
