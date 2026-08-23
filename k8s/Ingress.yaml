@@ -3,20 +3,20 @@ kind: Ingress
 metadata:
   name: shopapp-ingress
   namespace: default
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   ingressClassName: nginx
+
+  tls:
+    - hosts:
+        - harshalxz.3utilities.com
+      secretName: shopapp-tls
+
   rules:
     - host: harshalxz.3utilities.com
       http:
         paths:
-          - path: /.well-known/acme-challenge
-            pathType: Prefix
-            backend:
-              service:
-                name: acme-challenge
-                port:
-                  number: 80
-
           - path: /api
             pathType: Prefix
             backend:
